@@ -9,98 +9,108 @@ API_ID = 21226626
 API_HASH = "ea1a0c2fa9587a9df2a3325056efe110" 
 BOT_TOKEN = "8628506847:AAHXZ5rbQvA4BA2CZuf-R-_tt17dqQ3aRRk" 
 OWNER_ID = 2011675494  
-CHANNEL_USER = "ybpi1" # معرف قناتك بدون @
+CHANNEL_USER = "ybpi1" # معرف قناتك للاشتراك الإجباري
 
 app = Client("saqr_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# ملف حفظ حالات القفل
+# ملفات البيانات
+GROUPS_FILE = "ReplyGroups.json"
+USERS_FILE = "usefebot.json"
 LOCKS_FILE = "locks.json"
 
+# دالة لجلب الأقفال
 def get_locks():
     if not os.path.exists(LOCKS_FILE):
-        initial_locks = {
-            "الروابط": False, "المعرف": False, "التاك": False, "الشارحه": False,
-            "التعديل": False, "المتحركه": False, "الملفات": False, "الصور": False,
-            "الفيديو": False, "البوتات": False, "التكرار": False, "الملصقات": False,
-            "التوجيه": False, "الاغاني": False, "الصوت": False, "التثبيت": False,
-            "الدردشه": False, "الفشار": False, "الكفر": False, "الاباحي": False
+        initial = {
+            "الروابط": False, "المعرف": False, "التاك": False, "الصور": False,
+            "الفيديو": False, "الملصقات": False, "المتحركه": False, "التوجيه": False,
+            "الاغاني": False, "الصوت": False, "الفشار": False, "الكفر": False
         }
-        with open(LOCKS_FILE, "w", encoding="utf-8") as f:
-            json.dump(initial_locks, f)
-    with open(LOCKS_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+        with open(LOCKS_FILE, "w", encoding="utf-8") as f: json.dump(initial, f)
+    return json.load(open(LOCKS_FILE, "r", encoding="utf-8"))
 
-# --- فحص الاشتراك الإجباري ---
-async def check_subscribe(client, message):
+# دالة حفظ المشتركين والمجموعات
+def save_data(file_path, data_id):
+    if not os.path.exists(file_path):
+        with open(file_path, "w") as f: json.dump([], f)
+    with open(file_path, "r") as f: data = json.load(f)
+    if data_id not in data:
+        data.append(data_id)
+        with open(file_path, "w") as f: json.dump(data, f)
+
+# فحص الاشتراك الإجباري
+async def check_sub(client, message):
     try:
         await client.get_chat_member(CHANNEL_USER, message.from_user.id)
         return True
     except UserNotParticipant:
         await message.reply_text(
-            f"⚠️ عذراً عزيزي، يجب عليك الاشتراك في قناة البوت أولاً لاستخدام الميزات!\n\nقناتنا: @{CHANNEL_USER}",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("اضغط هنا للاشتراك 📢", url=f"https://t.me/{CHANNEL_USER}")
-            ]])
+            f"⚠️ عذراً عزيزي، يجب عليك الاشتراك في قناة البوت أولاً!\n📢 القناة: @{CHANNEL_USER}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("اضغط هنا للاشتراك", url=f"https://t.me/{CHANNEL_USER}")]])
         )
         return False
-    except Exception:
-        return True # في حال وجود خطأ تقني لا نعطل البوت
+    except: return True
 
-# --- معالج أوامر القفل والفتح (للمطور/المشرف) ---
+# --- لوحة التحكم الرئيسية ---
+main_markup = InlineKeyboardMarkup([
+    [InlineKeyboardButton("{ الاوامر }", callback_data="show_locks")],
+    [InlineKeyboardButton("{ جلب النسخة }", callback_data="backup"), InlineKeyboardButton("{ المطور }", url="tg://user?id=2011675494")],
+    [InlineKeyboardButton("┇ 𝖢𝖧𝖠𝖭𝖭𝖤𝖫 𝖲𝖠𝖰𝖱", url=f"https://t.me/{CHANNEL_USER}")]
+])
+
+@app.on_message(filters.command("start"))
+async def start(client, message):
+    if not await check_sub(client, message): return
+    save_data(USERS_FILE, message.from_user.id)
+    await message.reply_text(f"أهلاً بك يا سيدي الصقر 🦅\nأنا بوت حماية متكامل لتأمين مجموعتك.", reply_markup=main_markup)
+
+# --- معالج أوامر قفل و فتح ---
 @app.on_message(filters.group & filters.regex(r"^(قفل|فتح) (.*)"))
-async def lock_unlock_handler(client, message):
-    if not await check_subscribe(client, message): return
-    
-    # التحقق من أن المرسل هو المطور أو مشرف
-    member = await client.get_chat_member(message.chat.id, message.from_user.id)
-    if message.from_user.id != OWNER_ID and member.status not in ["administrator", "creator"]:
-        return
+async def lock_unlock(client, message):
+    if not await check_sub(client, message): return
+    # التحقق من الرتبة (مطور أو أدمن)
+    user = await client.get_chat_member(message.chat.id, message.from_user.id)
+    if message.from_user.id != OWNER_ID and user.status not in ["administrator", "creator"]: return
 
-    action = message.matches[0].group(1)
-    item = message.matches[0].group(2).strip()
-    
+    action, item = message.matches[0].group(1), message.matches[0].group(2).strip()
     locks = get_locks()
     if item in locks:
-        status = True if action == "قفل" else False
-        locks[item] = status
-        with open(LOCKS_FILE, "w", encoding="utf-8") as f:
-            json.dump(locks, f, ensure_ascii=False, indent=4)
-        
-        status_text = "مقفول 🔒" if status else "مفتوح 🔓"
-        await message.reply_text(f"★ ¦ تم {action} {item} بنجاح\n★ ¦ الحالة الآن: {status_text}")
+        locks[item] = True if action == "قفل" else False
+        json.dump(locks, open(LOCKS_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=4)
+        await message.reply_text(f"★ ¦ تم {action} {item} بنجاح ✅")
 
-# --- نظام الحماية التلقائي ---
+# --- نظام الحماية ---
 @app.on_message(filters.group & ~filters.service, group=2)
-async def auto_protection(client, message):
+async def protector(client, message):
     if message.from_user and message.from_user.id == OWNER_ID: return
-    
     locks = get_locks()
-    # (هنا نضع نفس شروط الحذف التي شرحناها سابقاً للصور والروابط...)
     if message.text or message.caption:
         text = message.text or message.caption
-        if locks.get("الروابط") and ("http" in text or "t.me" in text): await message.delete()
-    if locks.get("الصور") and message.photo: await message.delete()
+        if locks["الروابط"] and ("http" in text or "t.me" in text): await message.delete()
+        if locks["المعرف"] and "@" in text: await message.delete()
+    if locks["الصور"] and message.photo: await message.delete()
+    if locks["الفيديو"] and message.video: await message.delete()
+    if locks["الملصقات"] and message.sticker: await message.delete()
+    if locks["التوجيه"] and message.forward_from_chat: await message.delete()
 
-# --- قائمة الأوامر بحقوقك ---
-@app.on_message(filters.command("الاوامر"))
-async def show_all_locks(client, message):
-    if not await check_subscribe(client, message): return
+# --- معالج الأزرار ---
+@app.on_callback_query()
+async def callback_handler(client, query: CallbackQuery):
+    if query.data == "show_locks":
+        locks = get_locks()
+        text = "★ ¦ اوامر الحمايه كالاتي ...\n—————————————\n"
+        for k, v in locks.items(): text += f"★ ¦ {'قفل 🔒' if v else 'فتح 🔓'} ← {k}\n"
+        text += "—————————————"
+        await query.message.edit_text(text, reply_markup=main_markup)
     
-    locks = get_locks()
-    text = "★ ¦ اوامر الحمايه الخاصة ببوت الصقر ...\n"
-    text += "—————————————\n"
-    for key, val in locks.items():
-        status = "قفل 🔒" if val else "فتح 🔓"
-        text += f"★ ¦ {status} ← {key}\n"
-    text += "—————————————"
-    
-    markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("{ 2 }", callback_data="p2"), InlineKeyboardButton("{ 1 }", callback_data="p1")],
-        [InlineKeyboardButton("{ 4 }", callback_data="p4"), InlineKeyboardButton("{ 3 }", callback_data="p3")],
-        [InlineKeyboardButton("┇ 𝖢𝖧𝖠𝖭𝖭𝖤𝖫 𝖲𝖠𝖰𝖱", url=f"https://t.me/{CHANNEL_USER}")]
-    ])
-    
-    await message.reply_text(text, reply_markup=markup)
+    elif query.data == "backup":
+        if query.from_user.id != OWNER_ID: return await query.answer("للمطور فقط!")
+        g_count = len(json.load(open(GROUPS_FILE))) if os.path.exists(GROUPS_FILE) else 0
+        u_count = len(json.load(open(USERS_FILE))) if os.path.exists(USERS_FILE) else 0
+        caption = f"★ ¦ تم جلب النسخه الاحتياطيه\n★ ¦ مجموعات: {{{g_count}}}\n★ ¦ مشتركين: {{{u_count}}}"
+        for f in [GROUPS_FILE, USERS_FILE]:
+            if os.path.exists(f): await client.send_document(OWNER_ID, f, caption=caption if "usefe" in f else "")
+        await query.answer("تم الإرسال للخاص ✅")
 
-print("✅ بوت الصقر يعمل الآن مع نظام الاشتراك الإجباري وحقوق قناتك!")
+print("✅ بوت الصقر الشامل جاهز للعمل!")
 app.run()
